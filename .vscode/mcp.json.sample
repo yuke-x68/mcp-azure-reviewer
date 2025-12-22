@@ -1,0 +1,17 @@
+{
+    "servers": {
+        "azure-repos-review-support": {
+            "command": "python",
+            "args": [
+                "main.py"
+            ],
+            "env": {
+                "AZURE_DEVOPS_ORGANIZATION": "organization-name",
+                "AZURE_DEVOPS_PROJECT": "project-name",
+                "AZURE_DEVOPS_REPOSITORY_ID": "repository-name",
+                "AZURE_DEVOPS_PAT": "PAT-CODE"
+            },
+            "type": "stdio"
+        }
+    }
+}

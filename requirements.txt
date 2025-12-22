@@ -1,0 +1,4 @@
+mcp
+azure-devops
+pydantic
+python-dotenv
