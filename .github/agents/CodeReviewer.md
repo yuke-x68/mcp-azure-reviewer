@@ -3,6 +3,7 @@ name: CodeReviewer
 description: Unityプロジェクトのコードレビューを行うエージェント
 tools: ['read', 'search', 'azure-repos-review-support/*']
 target: vscode
+model: Claude Sonnet 4.5
 ---
 
 # フロントエンド開発エージェント
