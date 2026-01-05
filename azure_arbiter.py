@@ -31,13 +31,10 @@ class AzureReposArbiter:
         result = self.client.get_pull_request(organization, project, repo_id, pr_id)
         
         # 必要なフィールドのリスト
-        # ※ AIの混乱を防ぐため、マージ済みと誤認させる日付情報を含む
-        #    last_merge_commit, repository (last_update_time等) は除外し、
-        #    PRの状態を判断するのに不可欠な情報のみに絞ります。
+        # ※ AIの混乱を防ぐため、マージ済みと誤認させる日付情報や状態情報を除外し、
+        #    PRの内容を理解するのに必要な情報のみに絞ります。
         key_map = {
-            'creation_date': ['creation_date', 'creationDate'],
             'description': ['description'],
-            'status': ['status'],
             'pull_request_id': ['pull_request_id', 'pullRequestId'],
             'source_ref_name': ['source_ref_name', 'sourceRefName'],
             'target_ref_name': ['target_ref_name', 'targetRefName'],

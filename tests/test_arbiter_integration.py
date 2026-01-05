@@ -16,11 +16,11 @@ def test_get_pull_request_details(arbiter, context, pr_id):
     
     # Verify only expected keys are present
     expected_keys = {
-        'creation_date', 'description', 'pull_request_id', 'source_ref_name', 
-        'target_ref_name', 'title', 'url', 'status', 'repository_name'
+        'description', 'pull_request_id', 'source_ref_name', 
+        'target_ref_name', 'title', 'url', 'repository_name'
     }
     assert set(pr.keys()) == expected_keys, f"Unexpected keys in response: {set(pr.keys()) - expected_keys}"
-    print(f"[SUCCESS] PR Status: {pr.get('status')}, Repository: {pr.get('repository_name')}")
+    print(f"[SUCCESS] Repository: {pr.get('repository_name')}")
 
 def test_get_pull_request_change_summary(arbiter, context, pr_id):
     print(f"\n[TEST] Fetching change summary for PR ID: {pr_id}")
