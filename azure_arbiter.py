@@ -15,6 +15,28 @@ class AzureReposArbiter:
         """
         self.client = client
         self.diff_generator = diff_generator or UnifiedDiffGenerator()
+    
+    def _normalize_change_type(self, change_type: str) -> str:
+        """Azure DevOpsのchangeTypeを標準ステータスに変換
+        
+        Args:
+            change_type: Azure DevOpsのchangeType（例: "edit", "add", "delete"）
+            
+        Returns:
+            標準化されたステータス: "added", "deleted", "modified", "renamed"
+        """
+        change_type_lower = str(change_type).lower()
+        
+        if "add" in change_type_lower:
+            return "added"
+        elif "delete" in change_type_lower:
+            return "deleted"
+        elif "rename" in change_type_lower or "source_rename" in change_type_lower:
+            return "renamed"
+        elif "edit" in change_type_lower:
+            return "modified"
+        else:
+            return "modified"  # デフォルト
 
     def get_pull_request(self, organization: str, project: str, repo_id: str, pr_id: int) -> Dict:
         """プルリクエストの詳細情報を取得し、必要な項目のみを抽出
@@ -100,10 +122,20 @@ class AzureReposArbiter:
                 if path.endswith(".meta"):
                     continue
                 
+                # 標準化されたステータスを取得
+                status = self._normalize_change_type(change_type)
+                
+                # ファイルの存在状態を判定
+                exists_in_base = status in ["modified", "deleted", "renamed"]
+                exists_in_head = status in ["modified", "added", "renamed"]
+                
                 # AIが理解しやすいように変更内容を整理
                 filtered_change = {
                     "path": path,
-                    "change_type": change_type,
+                    "change_type": change_type,  # 元のタイプを保持
+                    "status": status,  # 標準化されたステータス
+                    "exists_in_base": exists_in_base,  # baseブランチに存在するか
+                    "exists_in_head": exists_in_head,  # headブランチに存在するか
                     "item": item
                 }
                 

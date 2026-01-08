@@ -68,6 +68,42 @@ def test_get_pull_request_change_summary(arbiter, context, pr_id):
     
     # Verify change_counts is removed
     assert 'change_counts' not in summary, "change_counts should be removed"
+    
+    # Verify new status fields are present
+    print(f"\n[VALIDATION] Checking status, exists_in_base, and exists_in_head fields...")
+    
+    status_validation_errors = []
+    for idx, change in enumerate(summary['changes']):
+        path = change.get('path', '')
+        status = change.get('status')
+        exists_in_base = change.get('exists_in_base')
+        exists_in_head = change.get('exists_in_head')
+        change_type = change.get('change_type')
+        
+        # Verify status field exists and is valid
+        if status not in ["added", "deleted", "modified", "renamed"]:
+            status_validation_errors.append(f"Change {idx + 1} ({path}): Invalid status '{status}'")
+        
+        # Verify exists_in_base and exists_in_head are booleans
+        if not isinstance(exists_in_base, bool):
+            status_validation_errors.append(f"Change {idx + 1} ({path}): exists_in_base is not a boolean: {exists_in_base}")
+        if not isinstance(exists_in_head, bool):
+            status_validation_errors.append(f"Change {idx + 1} ({path}): exists_in_head is not a boolean: {exists_in_head}")
+        
+        # Verify logical consistency
+        if status == "added" and (exists_in_base or not exists_in_head):
+            status_validation_errors.append(f"Change {idx + 1} ({path}): added file should have exists_in_base=False and exists_in_head=True")
+        if status == "deleted" and (not exists_in_base or exists_in_head):
+            status_validation_errors.append(f"Change {idx + 1} ({path}): deleted file should have exists_in_base=True and exists_in_head=False")
+        if status == "modified" and (not exists_in_base or not exists_in_head):
+            status_validation_errors.append(f"Change {idx + 1} ({path}): modified file should have both exists_in_base=True and exists_in_head=True")
+        if status == "renamed" and (not exists_in_base or not exists_in_head):
+            status_validation_errors.append(f"Change {idx + 1} ({path}): renamed file should have both exists_in_base=True and exists_in_head=True")
+        
+        print(f"  Change {idx + 1}: path='{path}', status='{status}', exists_in_base={exists_in_base}, exists_in_head={exists_in_head}")
+    
+    assert len(status_validation_errors) == 0, f"Status validation errors:\n" + "\n".join(status_validation_errors)
+    print(f"[SUCCESS] All status fields are valid and logically consistent")
 
 
 def test_get_comments(arbiter, context, pr_id):

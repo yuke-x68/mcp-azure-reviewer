@@ -55,7 +55,14 @@ def get_pull_request_change_summary(id: int) -> dict:
         id (int): The ID of the pull request.
 
     Returns:
-        dict: A dictionary containing the list of changed files with their change types (add, edit, delete, etc.).
+        dict: A dictionary containing:
+            - changes: List of file changes with:
+                - path: File path in the PR
+                - change_type: Raw Azure DevOps change type
+                - status: Normalized status ("added", "deleted", "modified", "renamed")
+                - exists_in_base: Boolean indicating if file exists in base branch
+                - exists_in_head: Boolean indicating if file exists in head branch
+                - original_path: Original path (only for renamed files)
     """
     validate_config()
     client = get_client()

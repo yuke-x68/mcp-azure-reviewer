@@ -23,6 +23,9 @@ class Change(BaseModel):
     originalPath: Optional[str] = None
     path: Optional[str] = None # Identifying path
     changeType: str # edit, add, delete, etc.
+    status: Optional[str] = None  # Normalized status: "added", "deleted", "modified", "renamed"
+    existsInBase: Optional[bool] = None  # Whether file exists in base branch
+    existsInHead: Optional[bool] = None  # Whether file exists in head branch
     item: Optional[dict] = None # contains more info like objectId, etc.
 
 class Thread(BaseModel):
