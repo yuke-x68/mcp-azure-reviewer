@@ -26,6 +26,7 @@ class Change(BaseModel):
     status: Optional[str] = None  # Normalized status: "added", "deleted", "modified", "renamed"
     existsInBase: Optional[bool] = None  # Whether file exists in base branch
     existsInHead: Optional[bool] = None  # Whether file exists in head branch
+    previousFilename: Optional[str] = None  # Previous path for renamed files
     item: Optional[dict] = None # contains more info like objectId, etc.
 
 class Thread(BaseModel):

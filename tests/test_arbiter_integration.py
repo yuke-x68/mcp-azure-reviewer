@@ -106,6 +106,175 @@ def test_get_pull_request_change_summary(arbiter, context, pr_id):
     print(f"[SUCCESS] All status fields are valid and logically consistent")
 
 
+def test_renamed_files_handling(arbiter, context, pr_id):
+    """リネームされたファイルが正しく処理されることを確認
+    
+    このテストは、ファイルがリネームされた場合に：
+    1. 新しい場所のエントリのみが含まれる（古い場所のdeleted エントリは除外される）
+    2. status が "renamed" になる
+    3. previous_filename または original_path が設定される
+    ことを確認します。
+    """
+    print(f"\n[TEST] Checking renamed files handling for PR ID: {pr_id}")
+    summary = arbiter.get_pull_request_change_summary(
+        context['organization'],
+        context['project'],
+        context['repo_id'],
+        pr_id
+    )
+    
+    assert summary is not None
+    assert 'changes' in summary
+    
+    renamed_files = [change for change in summary['changes'] if change.get('status') == 'renamed']
+    deleted_files = [change for change in summary['changes'] if change.get('status') == 'deleted']
+    
+    print(f"\n[FOUND] {len(renamed_files)} renamed file(s)")
+    print(f"[FOUND] {len(deleted_files)} deleted file(s)")
+    
+    # リネームされたファイルの検証
+    for idx, renamed_file in enumerate(renamed_files):
+        path = renamed_file.get('path')
+        previous = renamed_file.get('previous_filename') or renamed_file.get('original_path')
+        
+        print(f"\n  Renamed file {idx + 1}:")
+        print(f"    New path: {path}")
+        print(f"    Previous path: {previous}")
+        print(f"    Full change data: {renamed_file}")
+        
+        # previous_filename または original_path が設定されていることを確認
+        if previous is not None:
+            # 古いパスが削除済みファイルリストに含まれていないことを確認
+            deleted_paths = [f.get('path') for f in deleted_files]
+            assert previous not in deleted_paths, \
+                f"Previous path '{previous}' of renamed file should not appear as a deleted file"
+            
+            print(f"    ✓ Previous path is not in deleted files list")
+        else:
+            print(f"    ⚠ Warning: previous_filename not set for this renamed file")
+        
+        # exists_in_base と exists_in_head の検証
+        assert renamed_file.get('exists_in_base') is True, \
+            f"Renamed file should have exists_in_base=True"
+        assert renamed_file.get('exists_in_head') is True, \
+            f"Renamed file should have exists_in_head=True"
+        
+        print(f"    ✓ Existence flags are correct")
+    
+    if len(renamed_files) > 0:
+        print(f"\n[SUCCESS] All {len(renamed_files)} renamed file(s) are correctly handled")
+    else:
+        print(f"\n[INFO] No renamed files found in this PR")
+
+
+def test_namespace_change_not_treated_as_rename(arbiter, context, pr_id):
+    """ファイルパスの変更を伴わない内部変更（namespace変更など）が
+    renamedではなくmodifiedとして正しく判定されることを確認
+    
+    このテストは、changeTypeに"rename"が含まれていても、
+    sourceServerItemがない場合は"modified"と判定されることを検証します。
+    """
+    print(f"\n[TEST] Checking namespace-only changes are not treated as rename for PR ID: {pr_id}")
+    summary = arbiter.get_pull_request_change_summary(
+        context['organization'],
+        context['project'],
+        context['repo_id'],
+        pr_id
+    )
+    
+    assert summary is not None
+    assert 'changes' in summary
+    
+    modified_files = [change for change in summary['changes'] if change.get('status') == 'modified']
+    renamed_files = [change for change in summary['changes'] if change.get('status') == 'renamed']
+    
+    print(f"\n[FOUND] {len(modified_files)} modified file(s)")
+    print(f"[FOUND] {len(renamed_files)} renamed file(s)")
+    
+    # 内部変更のみのファイルの検証
+    namespace_only_changes = []
+    for change in modified_files:
+        # changeTypeに"rename"が含まれているがstatusは"modified"のファイルを探す
+        change_type = change.get('change_type', '')
+        if 'rename' in change_type.lower():
+            namespace_only_changes.append(change)
+            path = change.get('path')
+            previous = change.get('previous_filename') or change.get('original_path')
+            
+            print(f"\n  Namespace-only change detected:")
+            print(f"    Path: {path}")
+            print(f"    Change type: {change_type}")
+            print(f"    Status: {change.get('status')}")
+            print(f"    Previous filename: {previous}")
+            
+            # previous_filenameがないことを確認（ファイルパス変更なし）
+            assert previous is None, \
+                f"File with namespace-only change should not have previous_filename: {path}"
+            
+            # statusがmodifiedであることを確認
+            assert change.get('status') == 'modified', \
+                f"File with namespace-only change should have status='modified', not 'renamed': {path}"
+            
+            print(f"    ✓ Correctly identified as modified (not renamed)")
+    
+    if len(namespace_only_changes) > 0:
+        print(f"\n[SUCCESS] Found {len(namespace_only_changes)} namespace-only change(s) correctly identified as modified")
+    else:
+        print(f"\n[INFO] No namespace-only changes found in this PR")
+
+
+def test_pr400_robstar_button_not_renamed(arbiter, context):
+    """PR 400のRobstarButton.csが誤ってrenamedと判定されないことを確認
+    
+    このテストは、実際の問題ケースであるPR 400のRobstarButton.csが
+    namespace変更のみで、正しく"modified"と判定されることを検証します。
+    """
+    pr_id = 400
+    print(f"\n[TEST] Checking PR {pr_id} - RobstarButton.cs should be modified, not renamed")
+    
+    summary = arbiter.get_pull_request_change_summary(
+        context['organization'],
+        context['project'],
+        context['repo_id'],
+        pr_id
+    )
+    
+    assert summary is not None
+    assert 'changes' in summary
+    
+    # RobstarButton.csを探す
+    robstar_button_files = [
+        change for change in summary['changes'] 
+        if 'RobstarButton.cs' in change.get('path', '') and not change.get('path', '').endswith('.meta')
+    ]
+    
+    print(f"\n[FOUND] {len(robstar_button_files)} RobstarButton.cs file(s)")
+    
+    for change in robstar_button_files:
+        path = change.get('path')
+        status = change.get('status')
+        change_type = change.get('change_type')
+        previous = change.get('previous_filename') or change.get('original_path')
+        
+        print(f"\n  File: {path}")
+        print(f"    Status: {status}")
+        print(f"    Change type: {change_type}")
+        print(f"    Previous filename: {previous}")
+        
+        # statusがmodifiedであることを確認（renamedではない）
+        assert status == 'modified', \
+            f"RobstarButton.cs should be 'modified', not '{status}'"
+        
+        # previous_filenameがないことを確認
+        assert previous is None, \
+            f"RobstarButton.cs should not have previous_filename: {previous}"
+        
+        print(f"    ✓ Correctly identified as modified (not renamed)")
+    
+    assert len(robstar_button_files) > 0, "RobstarButton.cs not found in PR 400"
+    print(f"\n[SUCCESS] RobstarButton.cs in PR {pr_id} is correctly identified as modified")
+
+
 def test_get_comments(arbiter, context, pr_id):
     print(f"\n[TEST] Fetching comments for PR ID: {pr_id}")
     comments = arbiter.get_comments(

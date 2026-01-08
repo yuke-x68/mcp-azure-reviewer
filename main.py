@@ -57,12 +57,16 @@ def get_pull_request_change_summary(id: int) -> dict:
     Returns:
         dict: A dictionary containing:
             - changes: List of file changes with:
-                - path: File path in the PR
+                - path: File path in the PR (new location for renamed files)
                 - change_type: Raw Azure DevOps change type
                 - status: Normalized status ("added", "deleted", "modified", "renamed")
                 - exists_in_base: Boolean indicating if file exists in base branch
                 - exists_in_head: Boolean indicating if file exists in head branch
                 - original_path: Original path (only for renamed files)
+                - previous_filename: Same as original_path, clearer naming for AI
+            
+            Note: For renamed files, only the new location entry is included.
+            The old location entry (with status="deleted") is automatically filtered out.
     """
     validate_config()
     client = get_client()

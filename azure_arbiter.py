@@ -16,14 +16,20 @@ class AzureReposArbiter:
         self.client = client
         self.diff_generator = diff_generator or UnifiedDiffGenerator()
     
-    def _normalize_change_type(self, change_type: str) -> str:
+    def _normalize_change_type(self, change_type: str, source_server_item: str = None) -> str:
         """Azure DevOpsのchangeTypeを標準ステータスに変換
         
         Args:
             change_type: Azure DevOpsのchangeType（例: "edit", "add", "delete"）
+            source_server_item: sourceServerItemフィールドの値（リネームの場合のみ存在）
             
         Returns:
             標準化されたステータス: "added", "deleted", "modified", "renamed"
+            
+        Note:
+            changeTypeに"rename"が含まれていても、sourceServerItemがない場合は
+            "modified"として扱います。これは、ファイルパスの変更を伴わない内部変更
+            （例：namespace変更）をリネームと誤認しないためです。
         """
         change_type_lower = str(change_type).lower()
         
@@ -31,7 +37,8 @@ class AzureReposArbiter:
             return "added"
         elif "delete" in change_type_lower:
             return "deleted"
-        elif "rename" in change_type_lower or "source_rename" in change_type_lower:
+        elif ("rename" in change_type_lower or "source_rename" in change_type_lower) and source_server_item:
+            # 実際にファイルパスが変更された場合のみ"renamed"とする
             return "renamed"
         elif "edit" in change_type_lower:
             return "modified"
@@ -101,6 +108,24 @@ class AzureReposArbiter:
         # Filter out folders (trees) and .meta files
         if "changes" in result:
             filtered_changes = []
+            renamed_files = {}  # リネームされたファイルを追跡: {新しいパス: 古いパス}
+            
+            # まず、リネームされたファイルを特定
+            for change in result["changes"]:
+                item = change.get("item", {})
+                path = item.get("path", "")
+                change_type_raw = change.get("changeType") or change.get("change_type") or ""
+                change_type = str(change_type_raw).lower()
+                
+                # リネームの場合、元のパスを記録
+                # sourceServerItemまたはoriginalPathから取得
+                if "rename" in change_type or "source_rename" in change_type:
+                    original_path = (change.get("sourceServerItem") or 
+                                   change.get("source_server_item") or
+                                   change.get("originalPath") or 
+                                   change.get("original_path"))
+                    if original_path:
+                        renamed_files[path] = original_path
             
             for change in result["changes"]:
                 item = change.get("item", {})
@@ -122,8 +147,17 @@ class AzureReposArbiter:
                 if path.endswith(".meta"):
                     continue
                 
+                # sourceServerItemを取得してリネーム判定に使用
+                source_server_item = (change.get("sourceServerItem") or 
+                                     change.get("source_server_item"))
+                
                 # 標準化されたステータスを取得
-                status = self._normalize_change_type(change_type)
+                status = self._normalize_change_type(change_type, source_server_item)
+                
+                # リネームの古い場所のエントリ（status: "deleted"）を除外
+                # リネームされたファイルの古いパスとして記録されている場合はスキップ
+                if status == "deleted" and path in renamed_files.values():
+                    continue
                 
                 # ファイルの存在状態を判定
                 exists_in_base = status in ["modified", "deleted", "renamed"]
@@ -140,9 +174,14 @@ class AzureReposArbiter:
                 }
                 
                 # 元のパスがある場合（リネーム等）はそれも追加
-                original_path = change.get("originalPath") or change.get("original_path")
+                # sourceServerItem、originalPath、original_pathの順に確認
+                original_path = (change.get("sourceServerItem") or 
+                               change.get("source_server_item") or
+                               change.get("originalPath") or 
+                               change.get("original_path"))
                 if original_path:
                     filtered_change["original_path"] = original_path
+                    filtered_change["previous_filename"] = original_path  # AIが分かりやすい名前でも追加
                 
                 filtered_changes.append(filtered_change)
             
