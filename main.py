@@ -104,6 +104,34 @@ def get_file_content(path: str, version: str = None) -> str:
     return client.get_file_content(ORGANIZATION, PROJECT, REPOSITORY_ID, path, version)
 
 @mcp.tool()
+def get_file_commit_history(path: str, since: str = None) -> dict:
+    """
+    Get the commit history for a specific file in the repository.
+
+    Useful for assessing file stability (Defect Proximity):
+    files with frequent recent changes tend to have higher defect density.
+
+    Args:
+        path (str): The file path in the repository (e.g. "/Robstar/Assets/RobstarScripts/Core/Foo.cs").
+        since (str, optional): Start date in ISO 8601 format (e.g. "2025-09-15").
+            Only commits after this date are included. Defaults to None (no date filter).
+
+    Returns:
+        dict: A dictionary containing:
+            - path: The queried file path
+            - since: The date filter applied (or null)
+            - total_commits: Number of commits found
+            - commits: List of commit summaries, each with:
+                - commit_id: Short commit hash (8 chars)
+                - date: Commit date
+                - author: Author name
+                - comment: First 120 chars of commit message
+    """
+    validate_config()
+    client = get_client()
+    return client.get_file_commit_history(ORGANIZATION, PROJECT, REPOSITORY_ID, path, since)
+
+@mcp.tool()
 def get_pull_request_unified_diff(id: int) -> str:
     """
     Get the unified diff format for a specific pull request.

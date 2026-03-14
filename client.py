@@ -2,6 +2,7 @@ from typing import List, Dict
 from azure.devops.connection import Connection
 from msrest.authentication import BasicAuthentication
 from azure.devops.v7_1.git.models import GitBaseVersionDescriptor, GitTargetVersionDescriptor, GitVersionDescriptor
+import chardet
 
 class AzureReposClient:
     def __init__(self, pat: str):
@@ -13,6 +14,50 @@ class AzureReposClient:
         self.pat = pat
         self.creds = BasicAuthentication("", pat)
         self._clients = {}
+    
+    def _decode_content(self, byte_content: bytes) -> str:
+        """バイトデータを適切なエンコーディングでデコード
+        
+        Args:
+            byte_content: デコードするバイトデータ
+            
+        Returns:
+            デコードされた文字列
+            
+        Note:
+            以下の順序でエンコーディングを試行します：
+            1. chardetによる自動検出
+            2. UTF-8
+            3. Shift-JIS (cp932)
+            4. Latin-1 (フォールバック、常に成功)
+        """
+        # 空データの場合
+        if not byte_content:
+            return ""
+        
+        # chardetで自動検出
+        detected = chardet.detect(byte_content)
+        if detected and detected.get('encoding'):
+            try:
+                return byte_content.decode(detected['encoding'])
+            except (UnicodeDecodeError, LookupError):
+                pass  # 次のエンコーディングを試す
+        
+        # UTF-8を試す
+        try:
+            return byte_content.decode('utf-8')
+        except UnicodeDecodeError:
+            pass
+        
+        # Shift-JIS (cp932)を試す
+        try:
+            return byte_content.decode('cp932')
+        except UnicodeDecodeError:
+            pass
+        
+        # 最終フォールバック: latin-1は常に成功する
+        # （全バイト値が有効な文字にマップされるため）
+        return byte_content.decode('latin-1', errors='replace')
 
     def _get_git_client(self, organization: str):
         """組織ごとのGitクライアントを取得または作成
@@ -129,7 +174,11 @@ class AzureReposClient:
             version_descriptor=version_descriptor
         )
         
-        content = "".join([chunk.decode("utf-8") for chunk in content_generator])
+        # バイトデータを結合
+        byte_content = b"".join([chunk for chunk in content_generator])
+        
+        # エンコーディングを自動検出してデコード
+        content = self._decode_content(byte_content)
         return content
 
     def get_file_content_at_commit(
@@ -139,7 +188,7 @@ class AzureReposClient:
         repo_id: str,
         path: str,
         commit_id: str
-    ) -> str:
+    ) -> tuple[str, str | None]:
         """特定のコミットでのファイル内容を取得
         
         Args:
@@ -150,11 +199,14 @@ class AzureReposClient:
             commit_id: コミットID
         
         Returns:
-            ファイル内容（ファイルが存在しない場合は空文字列）
+            (ファイル内容, エラーメッセージ)のタプル
+            - 成功時: (content, None)
+            - ファイル不在時: ("", None)  # 404エラーの場合
+            - その他のエラー時: ("", error_message)  # 取得失敗
             
         Note:
-            ファイルが存在しない場合（新規追加または削除されたファイル）は
-            空文字列を返します。これにより、呼び出し側で新規/削除の判定が可能です。
+            ファイルが存在しない場合（404）とその他のエラーを区別するため、
+            戻り値としてエラーメッセージも返します。
         """
         client = self._get_git_client(organization)
         
@@ -171,10 +223,56 @@ class AzureReposClient:
                 version_descriptor=version_descriptor
             )
             
-            content = "".join([chunk.decode("utf-8") for chunk in content_generator])
-            return content
+            # バイトデータを結合
+            byte_content = b"".join([chunk for chunk in content_generator])
+            
+            # エンコーディングを自動検出してデコード
+            content = self._decode_content(byte_content)
+            return content, None
             
         except Exception as e:
-            # ファイルが存在しない場合（404など）は空文字列を返す
-            # これは新規追加または削除されたファイルの場合に発生する
-            return ""
+            # 404エラー（ファイルが存在しない）の場合とその他のエラーを区別
+            error_message = str(e)
+            if "404" in error_message or "does not exist" in error_message.lower():
+                # ファイルが存在しない場合（新規追加または削除されたファイル）
+                return "", None
+            else:
+                # その他のエラー（ネットワークエラー、権限エラーなど）
+                return "", f"Error fetching file: {error_message}"
+
+    def get_file_commit_history(
+        self,
+        organization: str,
+        project: str,
+        repo_id: str,
+        path: str,
+        since: str = None
+    ) -> List[Dict]:
+        """特定ファイルのコミット履歴を取得
+
+        Args:
+            organization: Azure DevOps組織名
+            project: プロジェクト名
+            repo_id: リポジトリID
+            path: ファイルパス
+            since: 開始日（ISO 8601形式、例: "2025-09-15"）。省略時は制限なし
+
+        Returns:
+            コミット情報の辞書のリスト
+        """
+        from azure.devops.v7_1.git.models import GitQueryCommitsCriteria
+
+        client = self._get_git_client(organization)
+
+        search_criteria = GitQueryCommitsCriteria(
+            item_path=path,
+            from_date=since
+        )
+
+        commits = client.get_commits(
+            repository_id=repo_id,
+            search_criteria=search_criteria,
+            project=project
+        )
+
+        return [c.as_dict() for c in commits]

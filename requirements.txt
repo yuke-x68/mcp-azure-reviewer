@@ -2,3 +2,5 @@ mcp
 azure-devops
 pydantic
 python-dotenv
+chardet
+pytest

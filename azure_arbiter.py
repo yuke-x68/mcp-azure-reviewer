@@ -252,6 +252,38 @@ class AzureReposArbiter:
         result = self.client.get_file_content(organization, project, repo_id, path, version)
         return result
 
+    def get_file_commit_history(self, organization: str, project: str, repo_id: str, path: str, since: str = None) -> Dict:
+        """ファイルのコミット履歴を取得し、レビューに必要な情報に加工
+
+        Args:
+            organization: Azure DevOps組織名
+            project: プロジェクト名
+            repo_id: リポジトリID
+            path: ファイルパス
+            since: 開始日（ISO 8601形式）
+
+        Returns:
+            加工されたコミット履歴の辞書
+        """
+        commits = self.client.get_file_commit_history(organization, project, repo_id, path, since)
+
+        processed = []
+        for c in commits:
+            author = c.get("author", {})
+            processed.append({
+                "commit_id": c.get("commit_id", "")[:8],
+                "date": author.get("date", ""),
+                "author": author.get("name", ""),
+                "comment": (c.get("comment", "") or "")[:120],
+            })
+
+        return {
+            "path": path,
+            "since": since,
+            "total_commits": len(processed),
+            "commits": processed,
+        }
+
     def get_pull_request_unified_diff(self, organization: str, project: str, repo_id: str, pr_id: int) -> str:
         """プルリクエストの全ファイルのUnified Diffを取得
         
@@ -310,31 +342,46 @@ class AzureReposArbiter:
             # 変更前後のファイル内容を取得
             original_content = ""
             modified_content = ""
+            original_error = None
+            modified_error = None
             
             # 元のパス（リネーム用）
             original_path = change.get("originalPath") or change.get("original_path") or path
             
             # 削除、編集、リネームの場合は元の内容が必要
             if any(t in change_type for t in ["edit", "delete", "rename", "source_rename"]):
-                original_content = self.client.get_file_content_at_commit(
+                original_content, original_error = self.client.get_file_content_at_commit(
                     organization, project, repo_id, original_path, target_commit
                 )
             
             # 追加、編集、リネームの場合は変更後の内容が必要
             if any(t in change_type for t in ["edit", "add", "rename", "target_rename"]):
-                modified_content = self.client.get_file_content_at_commit(
+                modified_content, modified_error = self.client.get_file_content_at_commit(
                     organization, project, repo_id, path, source_commit
                 )
             
-            # Unified Diffを生成
-            file_diff = self.diff_generator.generate_file_diff(
-                original_content=original_content,
-                modified_content=modified_content,
-                file_path=path
-            )
-            
-            if file_diff:  # 差分がある場合のみ追加
-                unified_diffs.append(file_diff)
+            # エラーが発生した場合は、エラー情報を含めたdiffを生成
+            if original_error or modified_error:
+                error_diff = f"diff --git a/{path} b/{path}\n"
+                error_diff += f"# File: {path}\n"
+                error_diff += f"# Change Type: {change_type}\n"
+                if original_error:
+                    error_diff += f"# ERROR (Base): {original_error}\n"
+                if modified_error:
+                    error_diff += f"# ERROR (Head): {modified_error}\n"
+                error_diff += "#\n# 警告: このファイルの内容を取得できませんでした。\n"
+                error_diff += "# ファイルが削除されたわけではなく、一時的なエラーまたは権限の問題の可能性があります。\n"
+                unified_diffs.append(error_diff)
+            else:
+                # Unified Diffを生成
+                file_diff = self.diff_generator.generate_file_diff(
+                    original_content=original_content,
+                    modified_content=modified_content,
+                    file_path=path
+                )
+                
+                if file_diff:  # 差分がある場合のみ追加
+                    unified_diffs.append(file_diff)
         
         # 全ファイルのdiffを結合
         return "\n".join(unified_diffs)
